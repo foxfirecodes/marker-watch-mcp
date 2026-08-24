@@ -11,6 +11,8 @@ import {
   MarkerWatchManager,
   type VersionSnapshot,
 } from "./markerWatchManager.js";
+import { realpathSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 
 type AsyncVersionWait =
   | { id: string; afterVersion: number; status: "pending"; startedAt: string }
@@ -226,7 +228,7 @@ export async function startServer(): Promise<void> {
   await server.connect(transport);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(realpathSync(process.argv[1]!)).href) {
   void startServer().catch((error) => {
     console.error(error instanceof Error ? error.message : error);
     process.exitCode = 1;
