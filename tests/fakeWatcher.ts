@@ -29,17 +29,14 @@ export async function flushWatcherEvents(): Promise<void> {
   await new Promise<void>(resolve => setImmediate(resolve));
 }
 
-export const START = '12:00:00 PM - Starting compilation in watch mode...\n';
-export const REBUILD_START =
-  '12:01:00 PM - File change detected. Starting incremental compilation...\n';
-export const COMPLETE =
-  '12:00:01 PM - Found 0 errors. Watching for file changes.\n';
+export const START = '@@build:start@@\n';
+export const END = '@@build:end@@\n';
 
-export function emitBuild(
+export function emitVersion(
   child: FakeWatcher,
-  options: {start?: string; body?: string; complete?: string} = {},
+  body = 'diagnostic\n',
 ): void {
-  child.writeStdout(options.start ?? START);
-  child.writeStdout(options.body ?? 'src/index.ts(1,1): error TS1005: Test error\n');
-  child.writeStdout(options.complete ?? COMPLETE);
+  child.writeStdout(START);
+  child.writeStdout(body);
+  child.writeStdout(END);
 }

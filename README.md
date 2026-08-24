@@ -1,12 +1,14 @@
-# tsc-watch-mcp
+# marker-watch-mcp
 
-`tsc-watch-mcp` is a local stdio MCP server that runs one TypeScript watch
-command and returns the full output for each completed compilation.
+`marker-watch-mcp` runs one long-lived command and turns its output into
+versioned snapshots. A start marker opens a version; an end marker closes it.
+The server keeps the last 20 completed versions and exposes them over stdio
+MCP.
 
-It does not parse diagnostics, watch files itself, or restart TypeScript. It
-keeps the configured watch process alive until the MCP server stops.
+It does not watch files, restart commands, or parse diagnostics. Use any
+external watcher that emits markers and forwards its child command's output.
 
-## Install and build
+## Install
 
 ```sh
 pnpm install
@@ -14,165 +16,90 @@ pnpm build
 pnpm test
 ```
 
-The server needs Node.js and a watch command that stays running.
+## Command contract
 
-## Configure an MCP client
+The configured command must remain running and write both markers to stdout or
+stderr. It must not overlap runs: one start marker, all output for that run,
+then one end marker.
 
-Pass the watch command after `--`. Everything after `--` is sent unchanged to
-`spawn(command, args, { cwd, shell: false })`.
+Markers are literal substrings matched against complete output lines after ANSI
+control sequences are removed. Returned snapshots retain the original text.
 
-Use `--watch`, `--pretty false`, and `--preserveWatchOutput`. Plain output is
-important: terminal control codes can make watch-cycle detection unreliable.
+## Configuration
 
-### `npx tsc`
-
-```json
-{
-  "mcpServers": {
-    "tsc-watch": {
-      "command": "node",
-      "args": [
-        "/absolute/path/to/tsc-watch-mcp/dist/index.js",
-        "--cwd",
-        "/absolute/path/to/repo",
-        "--",
-        "npx",
-        "tsc",
-        "--watch",
-        "--pretty",
-        "false",
-        "--preserveWatchOutput"
-      ]
-    }
-  }
-}
-```
-
-### `pnpm exec tsc`
-
-```json
-{
-  "mcpServers": {
-    "tsc-watch": {
-      "command": "node",
-      "args": [
-        "/absolute/path/to/tsc-watch-mcp/dist/index.js",
-        "--cwd",
-        "/absolute/path/to/repo",
-        "--",
-        "pnpm",
-        "exec",
-        "tsc",
-        "--watch",
-        "--pretty",
-        "false",
-        "--preserveWatchOutput"
-      ]
-    }
-  }
-}
-```
-
-### Build-mode projects
-
-For project references, use TypeScript build mode:
-
-```json
-{
-  "mcpServers": {
-    "tsc-watch": {
-      "command": "node",
-      "args": [
-        "/absolute/path/to/tsc-watch-mcp/dist/index.js",
-        "--cwd",
-        "/absolute/path/to/repo",
-        "--",
-        "pnpm",
-        "exec",
-        "tsc",
-        "-b",
-        "tsconfig.json",
-        "--watch",
-        "--pretty",
-        "false",
-        "--preserveWatchOutput"
-      ]
-    }
-  }
-}
-```
-
-You can instead supply `TSC_WATCH_MCP_COMMAND`, `TSC_WATCH_MCP_ARGS` (a JSON
-array), and `TSC_WATCH_MCP_CWD`. Command-line settings take precedence over environment
-settings.
-
-## Debug watch output
-
-Use `get_tsc_output` in the Inspector to see the latest raw combined stdout
-and stderr. It is useful when status stays at `compiling` because it shows the
-exact line that did not match the completion marker.
-
-If the watcher fails to start, `get_tsc_status` includes its `error` field.
-
-For a file you can inspect outside the Inspector, pass `--log-file` or set
-`TSC_WATCH_MCP_LOG_FILE`. The server truncates this file when it starts, then
-appends raw received output in order:
+Pass server options before `--`; everything after it becomes the command and
+its exact arguments.
 
 ```sh
-node dist/index.js --cwd /absolute/path/to/repo --log-file /tmp/tsc-watch.log -- pnpm exec tsc --watch --pretty false --preserveWatchOutput
-tail -f /tmp/tsc-watch.log
+node dist/index.js \
+  --cwd /absolute/path/to/repo \
+  --start-marker '@@build:start@@' \
+  --end-marker '@@build:end@@' \
+  -- watcher --watch-paths 'src/**/*.ts' -- clyde lint tsc --no-watch app
 ```
 
-## Tools
+MCP client example:
 
-`get_tsc_status` reports whether the watcher is starting, compiling, waiting
-for changes, or has exited. It also reports the latest completed build.
+```json
+{
+  "mcpServers": {
+    "marker-watch": {
+      "command": "node",
+      "args": [
+        "/absolute/path/to/marker-watch-mcp/dist/index.js",
+        "--cwd", "/absolute/path/to/repo",
+        "--start-marker", "@@build:start@@",
+        "--end-marker", "@@build:end@@",
+        "--",
+        "watcher", "--watch-paths", "src/**/*.ts", "--",
+        "clyde", "lint", "tsc", "--no-watch", "app"
+      ]
+    }
+  }
+}
+```
 
-`await_tsc_build` waits for the first completed build strictly after
-`afterBuild`. Pass a timeout in milliseconds (up to 120 seconds). More than
-one caller can wait at once.
+Environment alternatives are `MARKER_WATCH_MCP_COMMAND`,
+`MARKER_WATCH_MCP_ARGS` (a JSON string array), `MARKER_WATCH_MCP_CWD`,
+`MARKER_WATCH_MCP_START_MARKER`, and `MARKER_WATCH_MCP_END_MARKER`.
 
-For slow projects, call `start_tsc_build_wait` instead. It returns an ID
-immediately and waits for up to one hour in the server. Call
-`get_tsc_build_wait` with that ID later; it returns `waiting`, the completed
-snapshot, or an error. This works in clients such as MCP Inspector that do not
-support task-notification UI.
+Pass `--log-file /tmp/marker-watch.log` or set
+`MARKER_WATCH_MCP_LOG_FILE` to write raw received output to a file. The file is
+truncated when the server starts.
 
-`get_tsc_build` returns one retained build by number, or the latest build when
-called without `build`. The server retains the latest 20 completed builds.
+## MCP tools
+
+- `get_build_status` returns process state, active version, and latest version.
+- `get_build({ version? })` returns a cached snapshot; omit `version` for the latest.
+- `await_build({ afterVersion?, timeoutMs? })` waits up to two minutes. When
+  `afterVersion` is omitted, it uses the current completed version and waits
+  for the next one.
+- `start_build_wait({ afterVersion, timeoutMs? })` returns a wait ID immediately;
+  `get_build_wait({ id })` returns its `pending` state or result. Background waits last up
+  to one hour.
+- `get_live_output({ tailChars? })` returns recent raw stdout and stderr,
+  including an active version that has not reached its end marker yet.
 
 ## Client flow
 
-Take a baseline before editing. This avoids missing a fast rebuild.
-
 ```text
-get_tsc_status()                         -> latestCompletedBuild: 41
-edit files
-await_tsc_build({ afterBuild: 41 })      -> full output for build 42
+get_build_status()                    -> latestCompletedVersion: 41
+change files (the external watcher starts a run)
+await_build({ afterVersion: 41 })     -> version 42 and full output
 ```
 
-Build 1 is TypeScript's initial watch compilation. The server returns raw
-received output, including diagnostics. It only removes ANSI control sequences
-from a separate copy used to find cycle markers.
+For long runs, replace the final call with `start_build_wait`, then query its
+ID later. On `SIGINT`, `SIGTERM`, or MCP transport shutdown, the server stops
+the command and its Unix process group.
 
-## Lifecycle and limits
-
-- The server starts exactly one child process and never restarts it in v1.
-- If it exits, pending waits fail with its exit code or signal and final output.
-- On MCP shutdown, `SIGINT`, or `SIGTERM`, the server stops the child. On Unix,
-  it stops the process group too, so package-manager children do not remain.
-- Output before TypeScript's first watch-start marker is treated as startup
-  output, not as a completed build.
-
-## Manual check with MCP Inspector
-
-Build the server, then launch the Inspector with a real project command:
+## Manual Inspector check
 
 ```sh
 pnpm build
-pnpm dlx @modelcontextprotocol/inspector node /absolute/path/to/tsc-watch-mcp/dist/index.js --cwd /absolute/path/to/repo -- pnpm exec tsc --watch --pretty false --preserveWatchOutput
+pnpm dlx @modelcontextprotocol/inspector \
+  node /absolute/path/to/marker-watch-mcp/dist/index.js \
+  --cwd /absolute/path/to/repo \
+  --start-marker '@@build:start@@' \
+  --end-marker '@@build:end@@' \
+  -- watcher --watch-paths 'src/**/*.ts' -- clyde lint tsc --no-watch app
 ```
-
-In the Inspector, call `get_tsc_status` until the initial build completes. Copy
-`latestCompletedBuild`, make a TypeScript edit, then call `await_tsc_build` with
-that value as `afterBuild`.

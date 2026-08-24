@@ -1,11 +1,11 @@
 {
-  "name": "tsc-watch-mcp",
+  "name": "marker-watch-mcp",
   "version": "0.1.0",
   "private": true,
-  "description": "An MCP server that exposes completed TypeScript watch builds.",
+  "description": "An MCP server that exposes marker-delimited command output versions.",
   "type": "module",
   "bin": {
-    "tsc-watch-mcp": "dist/index.js"
+    "marker-watch-mcp": "dist/index.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
