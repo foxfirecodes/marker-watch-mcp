@@ -203,9 +203,10 @@ export async function startServer(): Promise<void> {
   );
 
   server.registerTool(
-    "get_live_output",
+    "debug_get_live_output",
     {
-      description: "Return recent raw stdout and stderr from build processes.",
+      description:
+        "Return recent raw stdout and stderr from build processes. Meant only for debugging stuck builds.",
       inputSchema: {
         tailChars: z.number().int().positive().max(1_000_000).default(50_000),
       },

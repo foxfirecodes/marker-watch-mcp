@@ -1,0 +1,17 @@
+[mcp_servers.typescript_build]
+command = "marker-watch-mcp"
+args = [
+  "--start-marker",
+  "@@stalker:start",
+  "--end-marker",
+  "@@stalker:end",
+  "--",
+  "stalker",
+  "--watch",
+  ".",
+  "--markers",
+  "--",
+  "pnpm",
+  "run",
+  "build",
+]
